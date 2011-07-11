@@ -17,6 +17,8 @@ package fuse4j.hadoopfs;
  * limitations under the License.
  */
 
+import fuse.util.FuseArgumentParser;
+
 import java.io.IOException;
 
 /**
@@ -24,9 +26,9 @@ import java.io.IOException;
  */
 class HdfsClientFactory {
 
-    public static HdfsClient create(String hdfsUrl) {
+    public static HdfsClient create(FuseArgumentParser args) {
         try {
-            return new HdfsClientReal(new FuseUserCache(), hdfsUrl);
+            return new HdfsClientImpl(new FuseUserCache());
         } catch(IOException ioe) {
             ioe.printStackTrace();
             return null;

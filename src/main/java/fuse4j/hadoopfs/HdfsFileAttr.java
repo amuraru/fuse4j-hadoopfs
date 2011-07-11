@@ -45,10 +45,6 @@ public class HdfsFileAttr extends HdfsFileInfo {
         this.blocks = blocks;
     }
 
-    public void setTime(int time) {
-        setTime(time, time, time);
-    }
-
     public void setTime(int createTime, int modifiedTime, int accessTime) {
         this.createTime = createTime;
         this.modifiedTime = modifiedTime;

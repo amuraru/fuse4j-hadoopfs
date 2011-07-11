@@ -17,12 +17,18 @@ package fuse4j.hadoopfs;
  * limitations under the License.
  */
 
+import fuse.FuseContext;
+import fuse.FuseStatfs;
+
 import java.nio.ByteBuffer;
 
 /**
  * interface HdfsClient
  */
 public interface HdfsClient {
+
+    public FuseStatfs getStatus();
+
     public HdfsFileAttr getFileInfo(String path);
 
     public HdfsDirEntry[] listPaths(String path);
@@ -31,15 +37,19 @@ public interface HdfsClient {
      * @param path
      * @return Object --> hdfsFile, that should be passed to close()
      */
-    public Object openForRead(String path);
-
-    public Object createForWrite(String path);
+    public Object open(String path, int flags);
 
     public boolean close(Object hdfsFile);
 
     public boolean read(Object hdfsFile, ByteBuffer buf, long offset);
 
     public boolean write(Object hdfsFile, ByteBuffer buf, long offset);
+
+    public boolean flush(Object hdfsFile);
+
+    public boolean utime(String path, int atime, int mtime);
+
+    public boolean mknod(String path);
 
     public boolean mkdir(String path);
 
@@ -48,4 +58,6 @@ public interface HdfsClient {
     public boolean rmdir(String dirPath);
 
     public boolean rename(String src, String dst);
+
+
 }

@@ -19,32 +19,28 @@ package fuse4j.hadoopfs;
 
 import fuse.Errno;
 import fuse.Filesystem3;
-import fuse.FilesystemConstants;
 import fuse.FuseDirFiller;
 import fuse.FuseException;
 import fuse.FuseGetattrSetter;
 import fuse.FuseMount;
 import fuse.FuseOpenSetter;
 import fuse.FuseSizeSetter;
+import fuse.FuseStatfs;
 import fuse.FuseStatfsSetter;
 import fuse.LifecycleSupport;
 import fuse.XattrLister;
 import fuse.XattrSupport;
 import fuse.util.FuseArgumentParser;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.io.nativeio.NativeIO;
 
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Set;
 
-@SuppressWarnings({"OctalInteger"})
-public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSupport, Runnable {
-
-    private static final String LOCALHOST_HDFS = "hdfs://localhost:9000";
+public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSupport {
 
     private static final Log log = LogFactory.getLog(FuseHdfsClient.class);
 
@@ -53,26 +49,23 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
 
     private HdfsClient hdfs = null;
 
-    private HashMap<String, HdfsFileContext> hdfsFileCtxtMap = null;
-
     private Thread ctxtMapCleanerThread = null;
 
     public FuseHdfsClient() {
-        this(LOCALHOST_HDFS);
+        this(new String[]{});
     }
 
     public FuseHdfsClient(String [] args) {
-        this(new FuseArgumentParser(args).getSource());
+        this(new FuseArgumentParser(args));
     }
 
-    public FuseHdfsClient(String hdfsUrl) {
-        hdfs = HdfsClientFactory.create(hdfsUrl);
+    public FuseHdfsClient(FuseArgumentParser args) {
+        hdfs = HdfsClientFactory.create(args);
 
-        hdfsFileCtxtMap = new HashMap<String, HdfsFileContext>();
-
+        /*hdfsFileCtxtMap = new HashMap<String, HdfsFileContext>();
         ctxtMapCleanerThread = new Thread(this);
         ctxtMapCleanerThread.start();
-        log.info("created");
+        log.info("created");*/
     }
 
     public int getattr(String path, FuseGetattrSetter getattrSetter) throws FuseException {
@@ -133,7 +126,11 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
      */
     public int mknod(String path, int mode, int rdev) throws FuseException {
         log.info("mknod(): " + path + " mode: " + mode + "\n");
-
+        return hdfs.mknod(path) ? 0 : FuseException.EREMOTEIO ;
+        //if (hdfs.open(path, NativeIO.O_WRONLY | NativeIO.O_CREAT) != null)
+        //  return 0;
+        //return FuseException.EREMOTEIO;
+/**
         // do a quick check to see if the file already exists
         HdfsFileContext ctxt = pinFileContext(path);
 
@@ -170,6 +167,8 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
             return FuseException.EACCES;
         }
         return 0;
+
+*/
     }
 
     public int mkdir(String path, int mode) throws FuseException {
@@ -248,110 +247,32 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
     }
 
     public int utime(String path, int atime, int mtime) throws FuseException {
-        // not supported right now (write-once files...)
-        log.info("utime(): " + path + "\n");
-        return FuseException.ENOSYS;
+        log.info("utime(): " + path + "atime:" + atime + "mtime:"+ mtime + "\n" );
+        return hdfs.utime(path, atime, mtime) ? 0 : FuseException.EACCES;
     }
-
 
     public int statfs(FuseStatfsSetter statfsSetter) throws FuseException {
-        statfsSetter.set(
-                BLOCK_SIZE,
-                1000,
-                200,
-                180,
-                1000000, // TODO get actual file count.
-                0,
-                NAME_LENGTH
-        );
-
-        return 0;
+      log.info("statfs(): \n");
+      FuseStatfs status = hdfs.getStatus();
+      if (status == null)
+        return FuseException.EREMOTEIO;
+      statfsSetter.set(status.blockSize, status.blocks, status.blocksFree, status.blocksAvail, status.files,
+                       status.filesFree, status.namelen);
+      return 0;
     }
 
-
-    private void createFileHandle(String path, int flags, FuseOpenSetter openSetter) {
-        openSetter.setFh(new Object());
-    }
 
     // if open returns a filehandle by calling FuseOpenSetter.setFh() method, it will be passed to every method that supports 'fh' argument
     /**
      * open()
      */
+    @Override
     public int open(String path, int flags, FuseOpenSetter openSetter) throws FuseException {
         log.info("open(): " + path + " flags " + flags + "\n");
-
-        HdfsFileContext ctxt = pinFileContext(path);
-
-        //
-        // if this context is alive due to a recent mknod() operation
-        // then we will allow subsequent open()'s for write.
-        // until the first release().
-        //
-        if(ctxt != null) {
-            // from here on, if we fail, we will have to unpin the file-context
-            if(ctxt.openedForWrite) {
-                // return true only for write access
-                if(isWriteOnlyAccess(flags)) {
-                    createFileHandle(path, flags, openSetter);
-                    return 0;
-                }
-
-                // we cannot support read/write at this time, since the
-                // file has only been opened for 'writing' on HDFS
-                unpinFileContext(path);
-                //only writes allowed")
-                return FuseException.EACCES;
-            }
-
-            // if context has been opened already for reading,
-            // then return true only for read access
-            if(isReadOnlyAccess(flags)) {
-                createFileHandle(path, flags, openSetter);
-                return 0;
-            }
-
-            // we cannot support write at this time, since the
-            // file has only been opened for 'writing' on HDFS
-            unpinFileContext(path);
-
-            //only reads allowed
-            return FuseException.EACCES;
-        }
-
-        //
-        // if we are here, then the ctxt must be null, and we will open
-        // the file for reading via HDFS.
-        //
-
-        // we will only support open() for 'read'
-        if(!isReadOnlyAccess(flags)) {
-            // only reads allowed")
-            return FuseException.EACCES;
-        }
-
-        // open the file
-        Object hdfsFile = hdfs.openForRead(path);
-
-        if(hdfsFile == null) {
-            // uknown error in open()")
-            return FuseException.EACCES;
-        }
-
-        // track this newly opened file, for reading.
-        if(!addFileContext(path, new HdfsFileContext(hdfsFile, false), true)) {
-            // if we raced with another thread, then close off the open file
-            // and fail this open().
-            hdfs.close(hdfsFile);
-
-            // TODO: don't fail this open() when racing with another
-            //       thread, instead just use the
-            //       already inserted 'context'...?
-            // "collision").initErrno(
-
-            return FuseException.EACCES;
-        }
-
-        createFileHandle(path, flags, openSetter);
+        Object fh = hdfs.open(path, flags);
+        if (fh == null)
+          return FuseException.EACCES;
+        openSetter.setFh( fh );
         return 0;
     }
 
@@ -363,31 +284,13 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
 
         //return Errno.EBADF;
         log.info("read(): " + path + " offset: " + offset + " len: "
-            + buf.capacity() + "\n");
+            + buf.capacity() + "FH:" + fh + "\n");
 
-        HdfsFileContext ctxt = pinFileContext(path);
-
-        if(ctxt == null) {
-            //file not opened").initErrno(
-            return FuseException.EPERM;
-        }
-
-        if(ctxt.openedForWrite) {
-            unpinFileContext(path);
-            //file not opened for read")
-            return FuseException.EPERM;
-        }
-
-        boolean status = hdfs.read(ctxt.hdfsFile, buf, offset);
-
-        unpinFileContext(path);
-
-        if(!status) {
-            // read failed
-            return FuseException.EACCES;
-        }
+        if (fh==null || ! hdfs.read(fh, buf, offset))
+          return FuseException.EPERM;
 
         return 0;
+
     }
 
     // fh is filehandle passed from open,
@@ -398,29 +301,8 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
     public int write(String path, Object fh, boolean isWritepage, ByteBuffer buf, long offset) throws FuseException {
         log.info("write(): " + path + " offset: " + offset + " len: "
             + buf.capacity() + "\n");
-
-        HdfsFileContext ctxt = pinFileContext(path);
-
-        if(ctxt == null) {
-            // file not opened
-            return FuseException.EPERM;
-        }
-
-        if(!ctxt.openedForWrite) {
-            unpinFileContext(path);
-
-            // file not opened for write")
-            return FuseException.EPERM;
-        }
-
-        boolean status = hdfs.write(ctxt.hdfsFile, buf, offset);
-
-        unpinFileContext(path);
-
-        if(!status) {
-            // write failed
-            return FuseException.EACCES;
-        }
+        if (fh==null || ! hdfs.write(fh, buf, offset))
+          return FuseException.EPERM;
 
         return 0;
     }
@@ -428,19 +310,19 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
     // (called when last filehandle is closed), fh is filehandle passed from open
     public int release(String path, Object fh, int flags) throws FuseException {
         log.info("release(): " + path + " flags: " + flags + "\n");
-        unpinFileContext(path);
-        System.runFinalization();
-
+        if (fh==null || ! hdfs.close(fh))
+          return FuseException.EPERM;
         return 0;
+    }
+
+    public int flush(String path, Object fh) throws FuseException {
+      log.info("flush(): " + path + " FH: " + fh + "\n");
+      if (fh==null || ! hdfs.flush(fh))
+        return FuseException.EPERM;
+      return 0;
     }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    public int flush(String path, Object fh) throws FuseException {
-        return 0;
-
-    }
-
     public int fsync(String path, Object fh, boolean isDatasync) throws FuseException {
         return 0;
     }
@@ -493,7 +375,7 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
         log.info("entering");
 
         try {
-            FuseMount.mount(args, new FuseHdfsClient(), log);
+            FuseMount.mount(args, new FuseHdfsClient(args), log);
         }
         catch(Exception e) {
             e.printStackTrace();
@@ -503,176 +385,4 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
         }
     }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    //
-    // Private Methods
-    //
-
-    /**
-     * isWriteOnlyAccess()
-     */
-    private boolean isWriteOnlyAccess(int flags) {
-        return ((flags & 0x0FF) == FilesystemConstants.O_WRONLY);
-    }
-
-    /**
-     * isReadOnlyAccess()
-     */
-    private boolean isReadOnlyAccess(int flags) {
-        return ((flags & 0x0FF) == FilesystemConstants.O_RDONLY);
-    }
-
-    /**
-     * addFileContext()
-     *
-     * @return false if the path is already tracked
-     */
-    private boolean addFileContext(String path, HdfsFileContext ctxt,
-                                   boolean pinFile) {
-        boolean addedCtxt = false;
-
-        synchronized(hdfsFileCtxtMap) {
-            Object o = hdfsFileCtxtMap.get(path);
-            if(o == null) {
-                if(pinFile) {
-                    ctxt.pinCount = 1;
-                }
-                hdfsFileCtxtMap.put(path, ctxt);
-                addedCtxt = true;
-            }
-        }
-
-        return addedCtxt;
-    }
-
-    /**
-     * pinFileContext()
-     */
-    private HdfsFileContext pinFileContext(String path) {
-        HdfsFileContext ctxt = null;
-
-        synchronized(hdfsFileCtxtMap) {
-            Object o = hdfsFileCtxtMap.get(path);
-            if(o != null) {
-                ctxt = (HdfsFileContext) o;
-                ctxt.pinCount++;
-            }
-        }
-
-        return ctxt;
-    }
-
-    /**
-     * unpinFileContext()
-     */
-    private void unpinFileContext(String path) {
-        synchronized(hdfsFileCtxtMap) {
-            Object o = hdfsFileCtxtMap.get(path);
-
-            if(o != null) {
-                HdfsFileContext ctxt = (HdfsFileContext) o;
-
-                ctxt.pinCount--;
-
-                if(ctxt.pinCount == 0) {
-                    unprotectedCleanupFileContext(path, ctxt);
-                    hdfsFileCtxtMap.remove(path);
-                }
-            }
-        }
-    }
-
-    /**
-     * cleanupExpiredFileContexts()
-     */
-    private void cleanupExpiredFileContexts() {
-        synchronized(hdfsFileCtxtMap) {
-            Set paths = hdfsFileCtxtMap.keySet();
-            Iterator pathsIter = paths.iterator();
-
-            while(pathsIter.hasNext()) {
-                String path = (String) pathsIter.next();
-
-                // remove expired file-contexts
-                HdfsFileContext ctxt = hdfsFileCtxtMap.get(path);
-                if(ctxt.expired()) {
-                    // close this context, and remove from the map
-                    unprotectedCleanupFileContext(path, ctxt);
-                    pathsIter.remove();
-                }
-            }
-        }
-    }
-
-    /**
-     * unprotectedCleanupFileContext()
-     */
-    private void unprotectedCleanupFileContext(String path, HdfsFileContext ctxt) {
-        log.info("closing...(): " + path + "\n");
-
-        hdfs.close(ctxt.hdfsFile);
-    }
-
-    //
-    // HdfsFileContext garbage collection
-    //
-
-    /**
-     * run()
-     * - this method is called on a thread, it sleepily trolls the
-     * HdfsFileContext-map to see if any expired contexts need to
-     * be shutdown (this can happen if a mknod() occurred, but the
-     * associated open()/write()/release() did not happen in which
-     * case we shutdown the file on HDFS after a set period of time,
-     * and the file becomes read-only.
-     */
-    public void run() {
-        // run once a minute...
-        final long timeToSleep = 10000;
-
-        try {
-            while(true) {
-                // wait for a bit, before checking for expired contexts
-                Thread.sleep(timeToSleep);
-
-                cleanupExpiredFileContexts();
-            }
-        } catch(InterruptedException inte) {
-            log.info("run(): " + inte + "\n");
-            return;
-        }
-    }
-}
-
-/**
- * class HdfsFileContext
- */
-class HdfsFileContext {
-    public Object hdfsFile = null;
-
-    public boolean openedForWrite = false;
-
-    public long pinCount = 0;
-
-    private long creationTime = 0;
-
-    // longest time this context can live with a pinCount of 0
-    //  - 20 seconds (in ms)
-    private static final long expiryTime = 20000;
-
-    /**
-     * @param hdfsFile
-     * @param openedForWrite
-     */
-    public HdfsFileContext(Object hdfsFile, boolean openedForWrite) {
-        this.hdfsFile = hdfsFile;
-        this.openedForWrite = openedForWrite;
-        this.creationTime = System.currentTimeMillis();
-    }
-
-    public boolean expired() {
-        return ((pinCount == 0) && ((System.currentTimeMillis() - creationTime) > expiryTime));
-    }
 }

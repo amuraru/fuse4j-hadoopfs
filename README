@@ -1,8 +1,10 @@
 This filesystem is now functional.
 
-The mount command takes two arguments:
+The mount command takes one argument:
 + Mount Point
-+ The HDFS server details
+
+hadoop-conf needs to be available in CLASSPATH
+
 
 For example:
-./hadoopfs.sh /hadoop localhost:9000
+./hadoopfs.sh /hadoop
