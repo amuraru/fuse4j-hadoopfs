@@ -161,16 +161,20 @@ class HdfsClientImpl implements HdfsClient {
         //see doConnectAsUser(dfs->nn_hostname, dfs->nn_port);
 
         if ((hdfs_flags & NativeIO.O_RDWR) == NativeIO.O_RDWR) {
+          hdfs_flags ^= NativeIO.O_RDWR;
           try {
             FileStatus fileStatus = dfs.getFileStatus(new Path(path));
-            // File exists; open this as read only.
-            hdfs_flags ^= NativeIO.O_RDWR;
-            hdfs_flags |= NativeIO.O_RDONLY;
+            if( this.newFiles.containsKey(path) ){
+              // just previously created by "mknod" so open it in write-mode
+              hdfs_flags |= NativeIO.O_WRONLY;
+            } else {
+              // File exists; open this as read only.
+              hdfs_flags |= NativeIO.O_RDONLY;
+            }
           } catch (IOException e) {
             // File does not exist (maybe?); interpret it as a O_WRONLY
             // If the actual error was something else, we'll get it again when
             // we try to open the file.
-            hdfs_flags ^= NativeIO.O_RDWR;
             hdfs_flags |= NativeIO.O_WRONLY;
           }
         }
