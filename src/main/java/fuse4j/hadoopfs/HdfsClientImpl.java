@@ -183,17 +183,24 @@ class HdfsClientImpl implements HdfsClient {
         Path hPath = new Path(path);
         if ((hdfs_flags & NativeIO.O_WRONLY) == 0) {
           //READ
-          System.out.println("HDFS OPEN file:"+path);
+          System.out.println("HDFS <open> file:"+path);
           return new HdfsFileIoContext(path, dfs.open(hPath));
         } else if ((hdfs_flags & NativeIO.O_APPEND) != 0) {
           //WRITE/APPEND
-          System.out.println("HDFS APPEND file:"+path);
+          System.out.println("HDFS <append> file:"+path);
           return new HdfsFileIoContext(path, dfs.append(hPath));
         } else {
           //WRITE/CREATE
-          System.out.println("HDFS CREATE file:"+path);
-          System.out.println(this.newFiles.size());
-          return this.newFiles.remove(path);
+          System.out.println("HDFS <create> file:"+path);
+          HdfsFileIoContext fh = this.newFiles.remove(path);
+          if (fh==null){
+            fh = new HdfsFileIoContext(path, dfs.create(new Path(path), true));
+            System.out.println("File " + path + "created");
+          }else {
+            System.out.println("File " + path + "already created by a previous <mknod> call");
+          }
+          System.out.println("files queued:" + this.newFiles.size());
+          return fh;
         }
       } catch (Exception e) {
         // fall through to failure
@@ -355,7 +362,7 @@ class HdfsClientImpl implements HdfsClient {
      */
     public boolean unlink(String filePath) {
         try {
-            return dfs.delete(new Path(filePath));
+            return dfs.delete(new Path(filePath), false);
         } catch(IOException ioe) {
             // fall through to failure
         }

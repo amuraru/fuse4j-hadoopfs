@@ -177,7 +177,7 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
         boolean status = hdfs.mkdir(path);
 
         if(!status) {
-            return FuseException.EACCES;
+            return FuseException.EREMOTEIO;
         }
         return 0;
     }
@@ -188,7 +188,7 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
         boolean status = hdfs.unlink(path);
 
         if(!status) {
-            return FuseException.EACCES;
+            return FuseException.EREMOTEIO;
         }
         return 0;
     }
@@ -199,7 +199,7 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
         boolean status = hdfs.rmdir(path);
 
         if(!status) {
-            return FuseException.EACCES;
+            return FuseException.EREMOTEIO;
         }
 
         return 0;
@@ -216,7 +216,7 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
         boolean status = hdfs.rename(from, to);
 
         if(!status) {
-            return FuseException.EPERM;
+            return FuseException.EREMOTEIO;
         }
         return 0;
     }
@@ -241,9 +241,28 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
     }
 
     public int truncate(String path, long size) throws FuseException {
-        log.info("truncate(): " + path + " size: " + size + "\n");
-        // Not supported
-        return FuseException.EPERM;
+        log.info("truncate(): " + path + " size: "+ size);
+        if (size!=0){
+          /* @see HDFS-860 */
+          return 0;
+        }
+
+        /* the requested size == 0, equivalent to delete & recreate file */
+        boolean status = hdfs.unlink(path);
+        if(!status) {
+          return FuseException.EREMOTEIO;
+        }
+        //Create, open and close a file to set the emulate the fuse flow when creating a new file
+        mknod(path, 0, 0);
+        Object fh = hdfs.open(path, NativeIO.O_WRONLY | NativeIO.O_CREAT);
+        if (fh == null) {
+          return FuseException.EREMOTEIO;
+        }
+        if ( ! hdfs.close(fh) ){
+          return FuseException.EREMOTEIO;
+        }
+
+        return 0;
     }
 
     public int utime(String path, int atime, int mtime) throws FuseException {
@@ -287,7 +306,7 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
             + buf.capacity() + "FH:" + fh + "\n");
 
         if (fh==null || ! hdfs.read(fh, buf, offset))
-          return FuseException.EPERM;
+          return FuseException.EREMOTEIO;
 
         return 0;
 
@@ -302,7 +321,7 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
         log.info("write(): " + path + " offset: " + offset + " len: "
             + buf.capacity() + "\n");
         if (fh==null || ! hdfs.write(fh, buf, offset))
-          return FuseException.EPERM;
+          return FuseException.EREMOTEIO;
 
         return 0;
     }
@@ -311,14 +330,14 @@ public class FuseHdfsClient implements Filesystem3, XattrSupport, LifecycleSuppo
     public int release(String path, Object fh, int flags) throws FuseException {
         log.info("release(): " + path + " flags: " + flags + "\n");
         if (fh==null || ! hdfs.close(fh))
-          return FuseException.EPERM;
+          return FuseException.EREMOTEIO;
         return 0;
     }
 
     public int flush(String path, Object fh) throws FuseException {
       log.info("flush(): " + path + " FH: " + fh + "\n");
       if (fh==null || ! hdfs.flush(fh))
-        return FuseException.EPERM;
+        return FuseException.EREMOTEIO;
       return 0;
     }
 
