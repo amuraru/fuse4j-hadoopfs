@@ -18,5 +18,7 @@ package fuse4j.hadoopfs;
  */
 
 public interface UserCache {
-    int getUid(String name);
+    int getUid(String name) throws Exception;
+
+    String getUsername(int uid) throws Exception;
 }

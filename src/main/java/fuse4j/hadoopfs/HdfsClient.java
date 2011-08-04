@@ -17,7 +17,6 @@ package fuse4j.hadoopfs;
  * limitations under the License.
  */
 
-import fuse.FuseContext;
 import fuse.FuseStatfs;
 
 import java.nio.ByteBuffer;
@@ -27,37 +26,37 @@ import java.nio.ByteBuffer;
  */
 public interface HdfsClient {
 
-    public FuseStatfs getStatus();
+    public FuseStatfs getStatus(int uid);
 
-    public HdfsFileAttr getFileInfo(String path);
+    public HdfsFileAttr getFileInfo(int uid, String path);
 
-    public HdfsDirEntry[] listPaths(String path);
+    public HdfsDirEntry[] listPaths(int uid, String path);
 
     /**
      * @param path
      * @return Object --> hdfsFile, that should be passed to close()
      */
-    public Object open(String path, int flags);
+    public Object open(int uid, String path, int flags);
 
-    public boolean close(Object hdfsFile);
+    public boolean close(int uid, Object hdfsFile);
 
-    public boolean read(Object hdfsFile, ByteBuffer buf, long offset);
+    public boolean read(int uid, Object hdfsFile, ByteBuffer buf, long offset);
 
-    public boolean write(Object hdfsFile, ByteBuffer buf, long offset);
+    public boolean write(int uid, Object hdfsFile, ByteBuffer buf, long offset);
 
-    public boolean flush(Object hdfsFile);
+    public boolean flush(int uid, Object hdfsFile);
 
-    public boolean utime(String path, int atime, int mtime);
+    public boolean utime(int uid, String path, int atime, int mtime);
 
-    public boolean mknod(String path);
+    public boolean mknod(int uid, String path);
 
-    public boolean mkdir(String path);
+    public boolean mkdir(int uid, String path);
 
-    public boolean unlink(String filePath);
+    public boolean unlink(int uid, String filePath);
 
-    public boolean rmdir(String dirPath);
+    public boolean rmdir(int uid, String dirPath);
 
-    public boolean rename(String src, String dst);
+    public boolean rename(int uid, String src, String dst);
 
 
 }

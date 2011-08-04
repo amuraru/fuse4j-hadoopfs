@@ -26,12 +26,13 @@ import java.util.Map;
 class FuseUserCache implements UserCache {
     private final Charset charset;
     private Map<String, PasswordEntry> users = new HashMap<String, PasswordEntry>();
+    private Map<Integer, PasswordEntry> uids = new HashMap<Integer, PasswordEntry>();
 
     FuseUserCache() {
         this.charset = Charset.forName("UTF8");
     }
 
-    private synchronized PasswordEntry get(String name) {
+    private synchronized PasswordEntry lookupUid(String name) {
         PasswordEntry entry = users.get(name);
 
         if(!users.containsKey(name)) {
@@ -42,13 +43,36 @@ class FuseUserCache implements UserCache {
         return entry;
     }
 
-    public int getUid(String name) {
-        final PasswordEntry entry = get(name);
+    private synchronized PasswordEntry lookupUsername(int uid) {
+      PasswordEntry entry = uids.get(uid);
+
+      if(!uids.containsKey(uid)) {
+          entry = PasswordEntry.lookupByUid(charset, uid);
+          uids.put(uid, entry);
+      }
+
+      return entry;
+    }
+
+    @Override
+    public int getUid(String name) throws Exception {
+        final PasswordEntry entry = lookupUid(name);
 
         if(entry == null) {
-            return 0;
+          throw new Exception ("Unknown username:" + name);
         }
 
         return entry.uid;
+    }
+
+    @Override
+    public String getUsername(int uid) throws Exception {
+      final PasswordEntry entry = lookupUsername(uid);
+
+      if(entry == null) {
+          throw new Exception ("Unknown uid:" + uid);
+      }
+
+      return entry.username;
     }
 }
